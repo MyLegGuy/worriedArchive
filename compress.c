@@ -4,7 +4,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <sys/stat.h> // required for FILE implementation
+#include <endian.h>
+#include <sys/stat.h>
 
 /*
 -2: error.
@@ -25,6 +26,7 @@ enum writeState{
 	WRITESTATE_FILEHEADER, // put file header into buffer then WRITESTATE_PUTBUFF
 	WRITESTATE_FILEDATA, // put file data in getBitFunc then WRITESTATE_BITBYBIT
 	WRITESTATE_FILENAME, // get filename then WRITESTATE_PUTBUFF
+	WRITESTATE_FINISHHASH, // After the file data, finish hash up and write it. only if not in bottomt table.
 	WRITESTATE_COMMENT, // get comment then WRITESTATE_PUTBUFF
 	WRITESTATE_TABLESTART, // TODO
 };
@@ -32,11 +34,11 @@ enum writeState{
 // must be at least big enough to hold the biggest header without the variable sized strings
 #define COMPRESSSTATEBUFFSIZE 256
 struct fileMeta{
-	uint64_t len;
-	uint64_t lastModified;
+	uint64_t len; // already stored in little endian
+	uint64_t lastModified; // already stored in little endian
 	// calculated
-	uint32_t crc32;
-	uint64_t posInFile;
+	uint32_t crc32; // already stored in little endian
+	uint64_t posInFile; // already stored in little endian
 };
 struct compressState{
 	size_t numSources;
@@ -123,17 +125,37 @@ top:
 				if (state->initSourceFunc(state->curSourceIndex,state->cachedMeta+state->curSourceIndex,&state->curSourceData,state->userData)){
 					return -2;
 				}
+				state->cachedMeta[state->curSourceIndex].len = htole64(state->cachedMeta[state->curSourceIndex].len);
+				state->cachedMeta[state->curSourceIndex].lastModified = htole64(state->cachedMeta[state->curSourceIndex].lastModified);
+				state->cachedMeta[state->curSourceIndex].posInFile=htole64(state->filePos);
 			}
 			resetBuffState(state,WRITESTATE_FILENAME);
 			strcpy(state->putBuff,state->isBottomTable ? BGFMAGIC : MFHMAGIC);
+			state->usedBuff=strlen(state->putBuff);
+			/*
+			memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].len),sizeof(uint64_t));
+			state->usedBuff+=sizeof(uint64_t);
+			uint16_t l;
+			*/
+
+			/*
+			  TODO - WRITE THESE.
+			  uint64_t fileDataLength
+			  uint16_t filenameLength
+			  uint16_t extraCommentLength
+			  uint64_t fileLastModifiedUnixTimestamp
+			 */
+			
 			strcat(state->putBuff,"MOREINFO");
 			state->usedBuff=strlen(state->putBuff);
-			if (state->isBottomTable){ // also write position and crc32 if we're doing the bottom metadata table
-				//state->putBuff+state->usedBuff = crc32
-				//state->putBuff+state->usedBuff+sizeof(uint64_t) = position
-
-				// GOOD LINE:
-				//state->usedBuff+=sizeof(uint64_t)*2;
+			if (state->isBottomTable){				
+				// also write crc32, which is already stored in little endian format
+				memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].crc32),sizeof(uint32_t));
+				state->usedBuff+=sizeof(uint32_t);
+				// also write position
+				uint64_t _fixedHash = htole64(state->cachedMeta[state->curSourceIndex].posInFile);
+				memcpy(state->putBuff+state->usedBuff,&_fixedHash,sizeof(uint64_t));
+				state->usedBuff+=sizeof(uint64_t);
 			}
 			break;
 		case WRITESTATE_FILENAME:
@@ -152,27 +174,29 @@ top:
 			break;
 		case WRITESTATE_FILEDATA:
 			if (!state->isBottomTable){
-				state->cachedMeta[state->curSourceIndex].posInFile=state->filePos;
 				state->wstate=WRITESTATE_BITBYBIT;
 				state->getBitFunc=state->getDataFunc;
 				state->getBitFuncData=state->curSourceData;
-				state->nextState=WRITESTATE_GOTONEXTFILE;
+				state->nextState=WRITESTATE_FINISHHASH;
 			}else{
 				// skip file data in bottom metadata table
 				_newState=WRITESTATE_GOTONEXTFILE;
 				goto top;
 			}
 			break;
-		case WRITESTATE_GOTONEXTFILE:
-			if (!state->isBottomTable){
-				if (state->closeSourceFunc(state->curSourceIndex,state->curSourceData,state->userData)){
-					return -2;
-				}
-			}else{
-				// PUT CRC32 INTO THE WRITE THE FOUND CRC32 AND THEN PUT IT INTO THE CACHED METADATA
-				// PUT CRC32 INTO THE WRITE THE FOUND CRC32 AND THEN PUT IT INTO THE CACHED METADATA
-				// PUT CRC32 INTO THE WRITE THE FOUND CRC32 AND THEN PUT IT INTO THE CACHED METADATA
+		case WRITESTATE_FINISHHASH:
+			// done with file contents
+			if (state->closeSourceFunc(state->curSourceIndex,state->curSourceData,state->userData)){
+				return -2;
 			}
+			// store the hash as little endian already
+			state->cachedMeta[state->curSourceIndex].crc32=htole32(state->curSourceIndex);
+			// write the hash
+			resetBuffState(state,WRITESTATE_GOTONEXTFILE);
+			memcpy(state->putBuff,&(state->cachedMeta[state->curSourceIndex].crc32),sizeof(uint32_t));
+			state->usedBuff=sizeof(uint32_t);
+			break;
+		case WRITESTATE_GOTONEXTFILE:
 			if (++state->curSourceIndex==state->numSources){ // if we're at the end
 				if (!state->isBottomTable){
 					_newState=WRITESTATE_TABLESTART;
@@ -230,12 +254,6 @@ top:
 				}
 			}
 			break;
-			case WRITESTATE_FILENAME:
-				break;
-			case WRITESTATE_COMMENT:
-				break;
-			case WRITESTATE_FILEDATA:
-				break;
 			case WRITESTATE_DONE:
 				return -1;
 				break;
