@@ -20,13 +20,12 @@ enum writeState{
 	WRITESTATE_PUTBUFF, // write whatever is in the buffer and then proceed to nextState
 	WRITESTATE_BITBYBIT, // using the current getBitFunc, write all the data. proceeds to nextState
 	//
-	WRITESTATE_GOTONEXTFILE, // increment curSourceIndex and be done or goto WRITESTATE_MFHMAGIC
+	WRITESTATE_GOTONEXTFILE, // increment curSourceIndex and be done or goto WRITESTATE_FILEHEADER
 	WRITESTATE_TOPMAGIC, // put top magic into buffer then WRITESTATE_PUTBUFF
 	WRITESTATE_FILEHEADER, // put file header into buffer then WRITESTATE_PUTBUFF
 	WRITESTATE_FILEDATA, // put file data in getBitFunc then WRITESTATE_BITBYBIT
 	WRITESTATE_FILENAME, // get filename then WRITESTATE_PUTBUFF
 	WRITESTATE_COMMENT, // get comment then WRITESTATE_PUTBUFF
-	WRITESTATE_MFHMAGIC, // put "middle file header magic" then  WRITESTATE_PUTBUFF then WRITESTATE_FILEHEADER
 	WRITESTATE_TABLESTART, // TODO
 };
 
@@ -35,13 +34,16 @@ enum writeState{
 struct fileMeta{
 	uint64_t len;
 	uint64_t lastModified;
+	// calculated
 	uint32_t crc32;
+	uint64_t posInFile;
 };
 struct compressState{
 	size_t numSources;
 	size_t curSourceIndex;
 	struct fileMeta* cachedMeta;
 	signed char wstate;
+	size_t filePos; // added to every time data is written by makeMoreArchive
 	// state-specific variabkes
 	char isBottomTable; 
 	void* curSourceData;
@@ -67,8 +69,10 @@ struct compressState{
 };
 
 #define MFHMAGIC "WARCFILE"
+#define BGFMAGIC "WARCENTRY"
 #define TOPMAGIC "WARCARCHIVEMAGIC"
 #define WRITEVERSION 1
+#define TABLEMAGIC "TABLESTART"
 
 // write until src is done or n bytes are written. returns number of bytes written.
 size_t strncpycnt(char* dest, const char* src, size_t n){
@@ -108,15 +112,10 @@ top:
 	state->localProgress=0;
 	switch(_newState){
 		case WRITESTATE_TOPMAGIC:
-			resetBuffState(state,WRITESTATE_MFHMAGIC);
+			resetBuffState(state,WRITESTATE_FILEHEADER);
 			memcpy(state->putBuff,TOPMAGIC,strlen(TOPMAGIC));
 			(state->putBuff)[strlen(TOPMAGIC)]=WRITEVERSION;
 			state->usedBuff=strlen(TOPMAGIC)+1;
-			break;
-		case WRITESTATE_MFHMAGIC:
-			resetBuffState(state,WRITESTATE_FILEHEADER);
-			strcpy(state->putBuff,MFHMAGIC);
-			state->usedBuff=strlen(state->putBuff);
 			break;
 		case WRITESTATE_FILEHEADER:
 			// prepare file buffer here
@@ -126,8 +125,16 @@ top:
 				}
 			}
 			resetBuffState(state,WRITESTATE_FILENAME);
-			strcpy(state->putBuff,"HEADERGOESHERE");
+			strcpy(state->putBuff,state->isBottomTable ? BGFMAGIC : MFHMAGIC);
+			strcat(state->putBuff,"MOREINFO");
 			state->usedBuff=strlen(state->putBuff);
+			if (state->isBottomTable){ // also write position and crc32 if we're doing the bottom metadata table
+				//state->putBuff+state->usedBuff = crc32
+				//state->putBuff+state->usedBuff+sizeof(uint64_t) = position
+
+				// GOOD LINE:
+				//state->usedBuff+=sizeof(uint64_t)*2;
+			}
 			break;
 		case WRITESTATE_FILENAME:
 			resetBuffState(state,WRITESTATE_COMMENT);
@@ -145,6 +152,7 @@ top:
 			break;
 		case WRITESTATE_FILEDATA:
 			if (!state->isBottomTable){
+				state->cachedMeta[state->curSourceIndex].posInFile=state->filePos;
 				state->wstate=WRITESTATE_BITBYBIT;
 				state->getBitFunc=state->getDataFunc;
 				state->getBitFuncData=state->curSourceData;
@@ -160,20 +168,30 @@ top:
 				if (state->closeSourceFunc(state->curSourceIndex,state->curSourceData,state->userData)){
 					return -2;
 				}
+			}else{
+				// PUT CRC32 INTO THE WRITE THE FOUND CRC32 AND THEN PUT IT INTO THE CACHED METADATA
+				// PUT CRC32 INTO THE WRITE THE FOUND CRC32 AND THEN PUT IT INTO THE CACHED METADATA
+				// PUT CRC32 INTO THE WRITE THE FOUND CRC32 AND THEN PUT IT INTO THE CACHED METADATA
 			}
 			if (++state->curSourceIndex==state->numSources){ // if we're at the end
 				if (!state->isBottomTable){
-					// TEMP - TEMP - TEMP - normally, proceed to footer table. in this case, just be done.
-					state->wstate=WRITESTATE_DONE;
-					//state->isBottomTable=1;
+					_newState=WRITESTATE_TABLESTART;
+					goto top;
 				}else{
 					state->wstate=WRITESTATE_DONE;
 				}
 			}else{
 				// proceed to next file as normal
-				_newState=WRITESTATE_MFHMAGIC;
+				_newState=WRITESTATE_FILEHEADER;
 				goto top;
 			}
+			break;
+		case WRITESTATE_TABLESTART:
+			state->isBottomTable=1;
+			resetBuffState(state,WRITESTATE_FILEHEADER);
+			memcpy(state->putBuff,TABLEMAGIC,strlen(TABLEMAGIC));
+			state->usedBuff=strlen(TABLEMAGIC);
+			state->curSourceIndex=0;
 			break;
 		default:
 			printf("invalid next state %d\n",state->nextState);
@@ -237,6 +255,7 @@ top:
 				return -1;
 		}
 		if (gotoNextState){
+			state->filePos+=justWrote;
 			bytesRequested-=justWrote;
 			dest+=justWrote;
 			if (initState(state,state->nextState)){
@@ -244,10 +263,10 @@ top:
 			}
 			goto top;
 		}
+		state->filePos+=*numBytesWritten;
 	}
 	return 0;
 }
-
 void prepareState(struct compressState* state, size_t _numSources){
 	state->numSources=_numSources;
 	state->cachedMeta=malloc(sizeof(struct fileMeta)*_numSources);
@@ -256,22 +275,28 @@ void prepareState(struct compressState* state, size_t _numSources){
 	state->usedBuff=0; // will cause to go to WRITESTATE_TOPMAGIC instantly
 	state->curSourceIndex=0;
 	state->isBottomTable=0;
+	state->filePos=0;
 }
-signed char getFileMetadata(void* src, size_t* ret){
+signed char getFileSize(FILE* fp, size_t* ret){
 	struct stat st;
-	if (fstat(fileno(src),&st)){
+	if (fstat(fileno(fp),&st)){
 		return 1;
 	}else{
 		*ret=st.st_size;
 		return 0;
 	}
 }
-
 signed char myInitSource(size_t i, struct fileMeta* infoDest, void** srcDest, void* _userData){
-	infoDest->len=0;
+	if (!(*srcDest=fopen(((char**)_userData)[i],"rb"))){
+		return -2;
+	}
+	size_t _gotLen;
+	if (getFileSize(*srcDest,&_gotLen)){
+		return -2;
+	}
+	infoDest->len=_gotLen;
 	infoDest->lastModified=0;
-	*srcDest=fopen(((char**)_userData)[i],"rb");
-	return *srcDest ? 0 : -2;
+	return 0;
 }
 signed char myCloseSource(size_t i, void* _closeThis, void* _userData){
 	return fclose(_closeThis)==0 ? 0 : -2;
