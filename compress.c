@@ -1,10 +1,9 @@
-// todo - maybe just make a state "go to in nextState"
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <endian.h>
+#include <time.h>
 #include <sys/stat.h>
 
 /*
@@ -23,12 +22,13 @@ enum writeState{
 	//
 	WRITESTATE_GOTONEXTFILE, // increment curSourceIndex and be done or goto WRITESTATE_FILEHEADER
 	WRITESTATE_TOPMAGIC, // put top magic into buffer then WRITESTATE_PUTBUFF
+	WRITESTATE_THISTIMESTAMP, // put the archive creation time from state->cachedTime through WRITESTATE_PUTBUFF
 	WRITESTATE_FILEHEADER, // put file header into buffer then WRITESTATE_PUTBUFF
 	WRITESTATE_FILEDATA, // put file data in getBitFunc then WRITESTATE_BITBYBIT
 	WRITESTATE_FILENAME, // get filename then WRITESTATE_PUTBUFF
 	WRITESTATE_FINISHHASH, // After the file data, finish hash up and write it. only if not in bottomt table.
 	WRITESTATE_COMMENT, // get comment then WRITESTATE_PUTBUFF
-	WRITESTATE_TABLESTART, // TODO
+	WRITESTATE_TABLESTART, // write table start magic through WRITESTATE_PUTBUFF
 };
 
 // must be at least big enough to hold the biggest header without the variable sized strings
@@ -52,10 +52,11 @@ struct compressState{
 	getDataFunc getBitFunc; // for WRITESTATE_BITBYBIT
 	void* getBitFuncData; // for WRITESTATE_BITBYBIT
 	signed char nextState; // some states go to this state next
-	uint64_t localProgress; // in WRITESTATE_PUTBUFF represents next char to be written
+	uint64_t localProgress; // in WRITESTATE_PUTBUFF represents next char to be written. in WRITESTATE_BITBYBIT represents total written
 	size_t usedBuff; // how much of the putBuff buffer is used
 	char* putBuff; // pointer to what to write for WRITESTATE_PUTBUFF. usually points to _internalBuff
 	char _internalBuff[COMPRESSSTATEBUFFSIZE]; // internal buffer for WRITESTATE_PUTBUFF.
+	time_t cachedTime; // to ensure the time written stays the same
 	// user functions
 	void* userData;
 	// for the file at the supplied index:
@@ -70,11 +71,11 @@ struct compressState{
 	getDataFunc getDataFunc;
 };
 
-#define MFHMAGIC "WARCFILE"
-#define BGFMAGIC "WARCENTRY"
-#define TOPMAGIC "WARCARCHIVEMAGIC"
+#define TOPMAGIC "WORRIEDARCHIVEMAGIC"
 #define WRITEVERSION 1
-#define TABLEMAGIC "TABLESTART"
+#define MFHMAGIC "WARCFILE" // middle file header
+#define TABLEMAGIC "WORRIEDTABLESTART"
+#define BGFMAGIC "WARCENTRY" // bottom file header
 
 // write until src is done or n bytes are written. returns number of bytes written.
 size_t strncpycnt(char* dest, const char* src, size_t n){
@@ -111,13 +112,18 @@ void resetBuffState(struct compressState* state, signed char _nextState){
 // returns 0 if worked, else on error
 signed char initState(struct compressState* state, signed char _newState){
 top:
-	state->localProgress=0;
 	switch(_newState){
 		case WRITESTATE_TOPMAGIC:
-			resetBuffState(state,WRITESTATE_FILEHEADER);
+			resetBuffState(state,WRITESTATE_THISTIMESTAMP);
 			memcpy(state->putBuff,TOPMAGIC,strlen(TOPMAGIC));
 			(state->putBuff)[strlen(TOPMAGIC)]=WRITEVERSION;
 			state->usedBuff=strlen(TOPMAGIC)+1;
+			break;
+		case WRITESTATE_THISTIMESTAMP:
+			resetBuffState(state,WRITESTATE_FILEHEADER);
+			uint64_t _fixedTime = htole64(state->cachedTime);
+			memcpy(state->putBuff,&_fixedTime,sizeof(uint64_t));
+			state->usedBuff=sizeof(uint64_t);
 			break;
 		case WRITESTATE_FILEHEADER:
 			// prepare file buffer here
@@ -130,24 +136,31 @@ top:
 				state->cachedMeta[state->curSourceIndex].posInFile=htole64(state->filePos);
 			}
 			resetBuffState(state,WRITESTATE_FILENAME);
+			// write magic
 			strcpy(state->putBuff,state->isBottomTable ? BGFMAGIC : MFHMAGIC);
 			state->usedBuff=strlen(state->putBuff);
-			/*
+			// write file length
 			memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].len),sizeof(uint64_t));
 			state->usedBuff+=sizeof(uint64_t);
-			uint16_t l;
-			*/
-
-			/*
-			  TODO - WRITE THESE.
-			  uint64_t fileDataLength
-			  uint16_t filenameLength
-			  uint16_t extraCommentLength
-			  uint64_t fileLastModifiedUnixTimestamp
-			 */
-			
-			strcat(state->putBuff,"MOREINFO");
-			state->usedBuff=strlen(state->putBuff);
+			// write filename length
+			uint16_t _tempLen;
+			char* _tempStr;
+			if (state->getFilenameFunc(state->curSourceIndex,&_tempStr,state->userData)){
+				return -2;
+			}
+			_tempLen=htole16(strlen(_tempStr));
+			memcpy(state->putBuff+state->usedBuff,&_tempLen,sizeof(uint16_t));
+			state->usedBuff+=sizeof(uint16_t);
+			// write comment length
+			if (state->getCommentFunc(state->curSourceIndex,&_tempStr,state->userData)){
+				return -2;
+			}
+			_tempLen=htole16(strlen(_tempStr));
+			memcpy(state->putBuff+state->usedBuff,&_tempLen,sizeof(uint16_t));
+			state->usedBuff+=sizeof(uint16_t);
+			// write last modified time
+			memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].lastModified),sizeof(uint16_t));
+			state->usedBuff+=sizeof(uint64_t);
 			if (state->isBottomTable){				
 				// also write crc32, which is already stored in little endian format
 				memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].crc32),sizeof(uint32_t));
@@ -175,6 +188,7 @@ top:
 		case WRITESTATE_FILEDATA:
 			if (!state->isBottomTable){
 				state->wstate=WRITESTATE_BITBYBIT;
+				state->localProgress=0;
 				state->getBitFunc=state->getDataFunc;
 				state->getBitFuncData=state->curSourceData;
 				state->nextState=WRITESTATE_FINISHHASH;
@@ -188,6 +202,11 @@ top:
 			// done with file contents
 			if (state->closeSourceFunc(state->curSourceIndex,state->curSourceData,state->userData)){
 				return -2;
+			}
+			// verify that we read as many bytes as we expected to
+			if (state->localProgress!=le64toh(state->cachedMeta[state->curSourceIndex].len)){
+				printf("Wrong number of bytes written. wrote %ld expected %ld\n",state->localProgress,le64toh(state->cachedMeta[state->curSourceIndex].len));
+				return 2;
 			}
 			// store the hash as little endian already
 			state->cachedMeta[state->curSourceIndex].crc32=htole32(state->curSourceIndex);
@@ -212,10 +231,15 @@ top:
 			break;
 		case WRITESTATE_TABLESTART:
 			state->isBottomTable=1;
-			resetBuffState(state,WRITESTATE_FILEHEADER);
+			state->curSourceIndex=0;
+			resetBuffState(state,WRITESTATE_THISTIMESTAMP);
+			// magic
 			memcpy(state->putBuff,TABLEMAGIC,strlen(TABLEMAGIC));
 			state->usedBuff=strlen(TABLEMAGIC);
-			state->curSourceIndex=0;
+			// count
+			uint64_t _fixedFileCount = htole64(state->numSources);
+			memcpy(state->putBuff+state->usedBuff,&_fixedFileCount,sizeof(uint64_t));
+			state->usedBuff+=sizeof(uint64_t);
 			break;
 		default:
 			printf("invalid next state %d\n",state->nextState);
@@ -235,6 +259,7 @@ top:
 		printf("at state %d->%d\n",state->wstate,state->nextState);
 		char gotoNextState=0;
 		size_t justWrote; // number of bytes you wrote in this iteration
+		signed char ret=0;
 		switch(state->wstate){
 			case WRITESTATE_PUTBUFF:
 			{
@@ -255,16 +280,17 @@ top:
 			}
 			break;
 			case WRITESTATE_DONE:
-				return -1;
+				ret=-1;
 				break;
 			case WRITESTATE_BITBYBIT:
 			{
 				signed char readRet = state->getBitFunc(state->getBitFuncData,dest,bytesRequested,&justWrote);
+				state->localProgress+=justWrote;
 				*numBytesWritten+=justWrote;
 				if (readRet==-1){
 					gotoNextState=1;
 				}else{
-					return readRet;
+					ret=readRet;
 				}
 			}
 			break;
@@ -282,8 +308,8 @@ top:
 			goto top;
 		}
 		state->filePos+=*numBytesWritten;
+		return ret;
 	}
-	return 0;
 }
 void prepareState(struct compressState* state, size_t _numSources){
 	state->numSources=_numSources;
@@ -294,6 +320,7 @@ void prepareState(struct compressState* state, size_t _numSources){
 	state->curSourceIndex=0;
 	state->isBottomTable=0;
 	state->filePos=0;
+	state->cachedTime=time(NULL); // programmer can change this variable right after this function call if he wishes
 }
 signed char getFileSize(FILE* fp, size_t* ret){
 	struct stat st;
