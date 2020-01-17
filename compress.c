@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <endian.h>
 #include <time.h>
+#include <zlib.h>
 #include <sys/stat.h>
 
 /*
@@ -77,6 +78,29 @@ struct compressState{
 #define TABLEMAGIC "WORRIEDTABLESTART"
 #define BGFMAGIC "WARCENTRY" // bottom file header
 
+signed char getFileBitAndHash(void* _uncastState, char* dest, size_t bytesRequested, size_t* numBytesWritten){
+	struct compressState* state = _uncastState;
+	signed char _getRet = state->getDataFunc(state->curSourceData,dest,bytesRequested,numBytesWritten);
+	if (_getRet==-2){
+		return -2;
+	}
+	if (*numBytesWritten!=0){
+		if (*numBytesWritten<=UINT32_MAX){
+			state->cachedMeta[state->curSourceIndex].crc32 = crc32(state->cachedMeta[state->curSourceIndex].crc32,(const Bytef*)dest,*numBytesWritten);
+		}else{
+			// can't pass more than uInt bytes at once
+			uint64_t _hashBytesLeft=*numBytesWritten;
+			uint64_t _buffOffset=0;
+			while(_hashBytesLeft>0){
+				uint32_t _passBytes = _hashBytesLeft>=UINT32_MAX ? UINT32_MAX : _hashBytesLeft;
+				state->cachedMeta[state->curSourceIndex].crc32 = crc32(state->cachedMeta[state->curSourceIndex].crc32,(const Bytef*)(dest+_buffOffset),_passBytes);
+				_hashBytesLeft-=_passBytes;
+				_buffOffset+=_hashBytesLeft;
+			}
+		}
+	}
+	return _getRet;
+}
 // write until src is done or n bytes are written. returns number of bytes written.
 size_t strncpycnt(char* dest, const char* src, size_t n){
 	if (!n){
@@ -189,9 +213,11 @@ top:
 			if (!state->isBottomTable){
 				state->wstate=WRITESTATE_BITBYBIT;
 				state->localProgress=0;
-				state->getBitFunc=state->getDataFunc;
-				state->getBitFuncData=state->curSourceData;
+				state->getBitFunc=getFileBitAndHash;
+				state->getBitFuncData=state;
 				state->nextState=WRITESTATE_FINISHHASH;
+				// default hash
+				state->cachedMeta[state->curSourceIndex].crc32 = crc32(0L, Z_NULL, 0);
 			}else{
 				// skip file data in bottom metadata table
 				_newState=WRITESTATE_GOTONEXTFILE;
@@ -208,8 +234,8 @@ top:
 				printf("Wrong number of bytes written. wrote %ld expected %ld\n",state->localProgress,le64toh(state->cachedMeta[state->curSourceIndex].len));
 				return 2;
 			}
-			// store the hash as little endian already
-			state->cachedMeta[state->curSourceIndex].crc32=htole32(state->curSourceIndex);
+			// convert the hash we were working on before to little endian
+			state->cachedMeta[state->curSourceIndex].crc32=htole32(state->cachedMeta[state->curSourceIndex].crc32);
 			// write the hash
 			resetBuffState(state,WRITESTATE_GOTONEXTFILE);
 			memcpy(state->putBuff,&(state->cachedMeta[state->curSourceIndex].crc32),sizeof(uint32_t));
@@ -366,12 +392,13 @@ signed char mygetDataFunc(void* src, char* dest, size_t requested, size_t* actua
 	return 0;
 }
 
-#define TESTCHUNKSIZE 1
+#define TESTCHUNKSIZE 500
 int main(int argc, char** args){
-	char* testFiles[3] = {
-		"/tmp/a",
-		"/tmp/b",
-		"/tmp/c",
+	char* testFiles[1] = {
+		//"/tmp/a",
+		//"/tmp/b",
+		//"/tmp/c",
+		"/tmp/BB22508C.png",
 	};
 	struct compressState s;
 	s.userData=testFiles;

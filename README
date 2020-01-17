@@ -51,23 +51,26 @@ uint64_t fileDataLength
 uint16_t filenameLength
 uint16_t extraCommentLength
 uint64_t fileLastModifiedUnixTimestamp
+
+section E:
 char[] filename (variable length. not null terminated.)
 char[] comment (variable length. not null terminated.)
 
-section E:
+section F:
 <file data>
 
-section F:
+section G:
 <crc32>
 
-section G:
+section H:
 <TABLEMAGIC>
 uint64_t fileCount;
 
-section H:
+section I:
 <BGFMAGIC>
 
-section I:
+section J:
+uint32_t crc32
 // byte offset from start of file pointing to start of a file's header in the middle of the file. the location it points to should start with <MFHMAGIC>
 uint64_t fileHeaderStartPos
 
@@ -82,14 +85,15 @@ for (all files){
 	section D;
 	section E;
 	section F;
+	section G;
 }
-section G;
+section H;
 section B;
 for(all files){
-	section H;
-	section D;
-	section F;
 	section I;
+	section D;
+	section J;
+	section E;
 }
 
 --------
