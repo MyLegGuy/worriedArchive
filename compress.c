@@ -3,17 +3,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <endian.h>
-#include <time.h>
 #include <zlib.h>
-#include <sys/stat.h>
-
-/*
--2: error.
--1: some data may've been written, but there's no more after this.
-	you must look for this return code. getting more data after a -1 return is undefined.
- 0: happy end. data was written
-*/
-typedef signed char(*getDataFunc)(void*,char*,size_t,size_t*);
+#include <time.h>
+#include "compress.h"
 
 enum writeState{
 	WRITESTATE_UNKNOWN=0,
@@ -31,16 +23,8 @@ enum writeState{
 	WRITESTATE_COMMENT, // get comment then WRITESTATE_PUTBUFF
 	WRITESTATE_TABLESTART, // write table start magic through WRITESTATE_PUTBUFF
 };
-
 // must be at least big enough to hold the biggest header without the variable sized strings
 #define COMPRESSSTATEBUFFSIZE 256
-struct fileMeta{
-	uint64_t len; // already stored in little endian
-	uint64_t lastModified; // already stored in little endian
-	// calculated
-	uint32_t crc32; // already stored in little endian
-	uint64_t posInFile; // already stored in little endian
-};
 struct compressState{
 	size_t numSources;
 	size_t curSourceIndex;
@@ -59,28 +43,14 @@ struct compressState{
 	char _internalBuff[COMPRESSSTATEBUFFSIZE]; // internal buffer for WRITESTATE_PUTBUFF.
 	time_t cachedTime; // to ensure the time written stays the same
 	// user functions
-	void* userData;
-	// for the file at the supplied index:
-	// fill the len and lastModified fields of the fileMeta struct
-	// put the source  custom pointer into the void**
-	signed char(*initSourceFunc)(size_t,struct fileMeta*,void**,void*);
-	// close the supplied source. index is only there if you need it.
-	// this source will never be opened again
-	signed char(*closeSourceFunc)(size_t,void*,void*); // index, sourceData, userdata
-	signed char(*getFilenameFunc)(size_t,char**,void*); // index, desd, userdata. you are in charge of the memory
-	signed char(*getCommentFunc)(size_t,char**,void*); // index, dest, userdata. you are in charge of the memory
-	getDataFunc getDataFunc;
+	struct userCallbacks user;
 };
 
-#define TOPMAGIC "WORRIEDARCHIVEMAGIC"
-#define WRITEVERSION 1
-#define MFHMAGIC "WARCFILE" // middle file header
-#define TABLEMAGIC "WORRIEDTABLESTART"
-#define BGFMAGIC "WARCENTRY" // bottom file header
+#include "formatInfo.h"
 
 signed char getFileBitAndHash(void* _uncastState, char* dest, size_t bytesRequested, size_t* numBytesWritten){
 	struct compressState* state = _uncastState;
-	signed char _getRet = state->getDataFunc(state->curSourceData,dest,bytesRequested,numBytesWritten);
+	signed char _getRet = state->user.getSourceData(state->curSourceData,dest,bytesRequested,numBytesWritten);
 	if (_getRet==-2){
 		return -2;
 	}
@@ -122,11 +92,6 @@ signed char lowGetStrBit(struct compressState* state, char* dest, size_t bytesRe
 	*numBytesWritten=written;
 	return (written==bytesRequested) ? 0 : -1;
 }
-// void* data, char* dest, size_t bytesRequested, size_t* numBytesWritten
-/* signed char getFilenameBit(void* _uncastState, char* dest, size_t bytesRequested, size_t* numBytesWritten){ */
-/* 	struct compressState* state = _uncastState; */
-/* 	return lowGetStrBit(state,dest,bytesRequested,numBytesWritten,state->filenames[state->curSourceIndex]); */
-/* } */
 void resetBuffState(struct compressState* state, signed char _nextState){
 	state->wstate=WRITESTATE_PUTBUFF;
 	state->nextState=_nextState;
@@ -152,7 +117,7 @@ top:
 		case WRITESTATE_FILEHEADER:
 			// prepare file buffer here
 			if (!state->isBottomTable){
-				if (state->initSourceFunc(state->curSourceIndex,state->cachedMeta+state->curSourceIndex,&state->curSourceData,state->userData)){
+				if (state->user.initSourceFunc(state->curSourceIndex,state->cachedMeta+state->curSourceIndex,&state->curSourceData,state->user.userData)){
 					return -2;
 				}
 				state->cachedMeta[state->curSourceIndex].len = htole64(state->cachedMeta[state->curSourceIndex].len);
@@ -169,14 +134,14 @@ top:
 			// write filename length
 			uint16_t _tempLen;
 			char* _tempStr;
-			if (state->getFilenameFunc(state->curSourceIndex,&_tempStr,state->userData)){
+			if (state->user.getFilenameFunc(state->curSourceIndex,&_tempStr,state->user.userData)){
 				return -2;
 			}
 			_tempLen=htole16(strlen(_tempStr));
 			memcpy(state->putBuff+state->usedBuff,&_tempLen,sizeof(uint16_t));
 			state->usedBuff+=sizeof(uint16_t);
 			// write comment length
-			if (state->getCommentFunc(state->curSourceIndex,&_tempStr,state->userData)){
+			if (state->user.getCommentFunc(state->curSourceIndex,&_tempStr,state->user.userData)){
 				return -2;
 			}
 			_tempLen=htole16(strlen(_tempStr));
@@ -197,14 +162,14 @@ top:
 			break;
 		case WRITESTATE_FILENAME:
 			resetBuffState(state,WRITESTATE_COMMENT);
-			if (state->getFilenameFunc(state->curSourceIndex,&(state->putBuff),state->userData)){
+			if (state->user.getFilenameFunc(state->curSourceIndex,&(state->putBuff),state->user.userData)){
 				return -2;
 			}
 			state->usedBuff=strlen(state->putBuff);
 			break;
 		case WRITESTATE_COMMENT:
 			resetBuffState(state,WRITESTATE_FILEDATA);
-			if (state->getCommentFunc(state->curSourceIndex,&(state->putBuff),state->userData)){
+			if (state->user.getCommentFunc(state->curSourceIndex,&(state->putBuff),state->user.userData)){
 				return -2;
 			}
 			state->usedBuff=strlen(state->putBuff);
@@ -226,7 +191,7 @@ top:
 			break;
 		case WRITESTATE_FINISHHASH:
 			// done with file contents
-			if (state->closeSourceFunc(state->curSourceIndex,state->curSourceData,state->userData)){
+			if (state->user.closeSourceFunc(state->curSourceIndex,state->curSourceData,state->user.userData)){
 				return -2;
 			}
 			// verify that we read as many bytes as we expected to
@@ -282,7 +247,6 @@ signed char makeMoreArchive(struct compressState* state, char* dest, size_t byte
 	*numBytesWritten=0;
 top:
 	{
-		printf("at state %d->%d\n",state->wstate,state->nextState);
 		char gotoNextState=0;
 		size_t justWrote; // number of bytes you wrote in this iteration
 		signed char ret=0;
@@ -337,7 +301,14 @@ top:
 		return ret;
 	}
 }
-void prepareState(struct compressState* state, size_t _numSources){
+struct userCallbacks* getCallbacks(struct compressState* s){
+	return &(s->user);
+}
+void setTime(struct compressState* s, time_t _newTime){
+	s->cachedTime=_newTime;
+}
+struct compressState* newState(size_t _numSources){
+	struct compressState* state = malloc(sizeof(struct compressState));
 	state->numSources=_numSources;
 	state->cachedMeta=malloc(sizeof(struct fileMeta)*_numSources);
 	// queue magic as first thing to do by using buffer write state that instantly ends
@@ -347,84 +318,5 @@ void prepareState(struct compressState* state, size_t _numSources){
 	state->isBottomTable=0;
 	state->filePos=0;
 	state->cachedTime=time(NULL); // programmer can change this variable right after this function call if he wishes
-}
-signed char getFileSize(FILE* fp, size_t* ret){
-	struct stat st;
-	if (fstat(fileno(fp),&st)){
-		return 1;
-	}else{
-		*ret=st.st_size;
-		return 0;
-	}
-}
-signed char myInitSource(size_t i, struct fileMeta* infoDest, void** srcDest, void* _userData){
-	if (!(*srcDest=fopen(((char**)_userData)[i],"rb"))){
-		return -2;
-	}
-	size_t _gotLen;
-	if (getFileSize(*srcDest,&_gotLen)){
-		return -2;
-	}
-	infoDest->len=_gotLen;
-	infoDest->lastModified=0;
-	return 0;
-}
-signed char myCloseSource(size_t i, void* _closeThis, void* _userData){
-	return fclose(_closeThis)==0 ? 0 : -2;
-}
-signed char myGetFilename(size_t i, char** dest, void* _userData){
-	*dest=((char**)_userData)[i];
-	return 0;
-}
-signed char myGetComment(size_t i, char** dest, void* _userData){
-	*dest="";
-	return 0;
-}
-signed char mygetDataFunc(void* src, char* dest, size_t requested, size_t* actual){
-	*actual = fread(dest,1,requested,src);
-	if (*actual!=requested){
-		if (ferror(src)){
-			return -2;
-		}else if (feof(src)){
-			return -1;
-		}
-	}
-	return 0;
-}
-
-#define TESTCHUNKSIZE 500
-int main(int argc, char** args){
-	char* testFiles[1] = {
-		//"/tmp/a",
-		//"/tmp/b",
-		//"/tmp/c",
-		"/tmp/BB22508C.png",
-	};
-	struct compressState s;
-	s.userData=testFiles;
-	s.initSourceFunc=myInitSource;
-	s.closeSourceFunc=myCloseSource;
-	s.getFilenameFunc=myGetFilename;
-	s.getCommentFunc=myGetComment;
-	s.getDataFunc=mygetDataFunc;
-	prepareState(&s,sizeof(testFiles)/sizeof(char*));
-
-	// write archive to file
-	FILE* dest = fopen("/tmp/outarc","wb");
-	char writeBuff[TESTCHUNKSIZE];
-	size_t gotBytes;
-	signed char lastRet;
-	while((lastRet=makeMoreArchive(&s,writeBuff,TESTCHUNKSIZE,&gotBytes))!=-2){
-		if (fwrite(writeBuff,1,gotBytes,dest)!=gotBytes){
-			lastRet=-2;
-			break;
-		}
-		if (lastRet==-1){
-			break;
-		}
-	}
-	if (lastRet==-2){
-		printf("error!\n");
-	}
-	fclose(dest);
+	return state;
 }

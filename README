@@ -10,31 +10,35 @@ features:
 * big magic to keep the file easy to find
 
 ==========
--- notes about this program
+-- windows
 ==========
-* the test program assumes GNU/Linux and therefor does no string conversion to UTF-8.
+* windows has literally deleted people's files after its forced updates. anybody who cares about their data surely isn't using windows, so windows support isn't considered for any of this code.
+
+==========
+-- notes about the test programs
+==========
+* they assume GNU/Linux and therefor do no string conversion to UTF-8.
+
+==========
+-- notes about the compression library
+==========
 * it is recommended that you compile on a system with time_t >32bits
-* there is no windows support right now. windows users don't care about their data, so this isn't a problem.
-  * source: <there was another recent instance of it. but where...>
-  * source: https://www.howtogeek.com/fyi/microsoft-explains-why-windows-10s-october-2018-update-was-deleting-peoples-files/
-  * source: to be continued...
 
 ==========
 -- format
 ==========
-
-#define TOPMAGIC "WORRIEDARCHIVEMAGIC"
-#define WRITEVERSION 1
-#define MFHMAGIC "WARCFILE"
-#define TABLEMAGIC "WORRIEDTABLESTART"
-#define BGFMAGIC "WARCENTRY"
-
 * all numbers little endian
 * all strings are UTF-8. the strings you give the program through the callback functions must respect this.
   * the test program assumes GNU/Linux and therefor does no conversion.
 * directory separator is '/'. only other character that can't be in filename is 0x0
 	* a file at the root called bla would have its filename be "bla"
 	* a file named "bla" in the folder "alb" would have its filename be "alb/bla"
+
+#define TOPMAGIC "WORRIEDARCHIVEMAGIC"
+#define WRITEVERSION 1
+#define MFHMAGIC "WARCFILE"
+#define TABLEMAGIC "WORRIEDTABLESTART"
+#define BGFMAGIC "WARCENTRY"
 
 section A:
 <TOPMAGIC>
