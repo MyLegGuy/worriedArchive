@@ -1,10 +1,24 @@
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/sendfile.h>
+#include <unistd.h>
 #include <stdint.h>
 #include <dirent.h>
 #include <stdlib.h>
 #include "formatInfo.h"
+//
+const char* findCharBackwards(const char* _startHere, const char* _endHere, int _target){
+	do{
+		if (_startHere[0]==_target){
+			return _startHere;
+		}
+		--_startHere;
+	}while(_startHere>_endHere);
+	return NULL;
+}
+//
 signed char freadSafe(void *ptr, size_t size, size_t nmemb, FILE *stream){
 	if (fread(ptr,size,nmemb,stream)!=nmemb){
 		fprintf(stderr,"failed to read %ld x %ld bytes\n",size,nmemb);
@@ -48,19 +62,28 @@ char dirExists(const char* _passedPath){
 	}/*else if (ENOENT == errno)*/
 	return 0;
 }
-const char* findCharBackwards(const char* _startHere, const char* _endHere, int _target){
-	do{
-		if (_startHere[0]==_target){
-			return _startHere;
-		}
-		--_startHere;
-	}while(_startHere>_endHere);
-	return NULL;
-}
+//
 #define COPYBUFF 16000
 signed char lowCopyFile(FILE* _sourceFp, const char* _destPath, char _canMakeDirs, size_t _totalBytes){
-	FILE* _destfp = fopen(_destPath,"wb");
-	if (_destfp!=NULL){
+	int _outdesc = open(_destPath, O_WRONLY | O_CREAT, 0644);
+	if (_outdesc!=-1){
+		// faster linux specific function
+		#if __linux__
+		off_t _sourceCurPos;
+		if ((_sourceCurPos = ftello(_sourceFp))==-1
+			|| fflush(_sourceFp)!=0){
+			exit(1);
+		}
+		int _srcDesc = fileno(_sourceFp);
+		if (_srcDesc==-1 ||
+			sendfile(_outdesc,_srcDesc,&_sourceCurPos,_totalBytes)==-1 ||
+			fseek(_sourceFp,_sourceCurPos,SEEK_SET) ||
+			close(_outdesc)){
+			perror("file copy failure");
+			exit(1);
+		}
+		#else
+		FILE* _destfp = fdopen(_outdesc,"wb");
 		char* _currentBit = malloc(COPYBUFF);
 		size_t _numRead=COPYBUFF;
 		while (_totalBytes!=0){
@@ -76,6 +99,7 @@ signed char lowCopyFile(FILE* _sourceFp, const char* _destPath, char _canMakeDir
 		}
 		free(_currentBit);
 		fclose(_destfp);
+		#endif
 	}else{
 		// Make all directories that need to be made for the destination to work
 		char _shouldRetry=0;
@@ -108,7 +132,6 @@ signed char lowCopyFile(FILE* _sourceFp, const char* _destPath, char _canMakeDir
 			}
 			free(_tempPath);
 		}
-
 		if (_shouldRetry){
 			lowCopyFile(_sourceFp,_destPath,0,_totalBytes);
 		}else{
@@ -121,8 +144,30 @@ signed char lowCopyFile(FILE* _sourceFp, const char* _destPath, char _canMakeDir
 char copyFile(FILE* _sourceFp, const char* _destPath, size_t _totalBytes){
 	return lowCopyFile(_sourceFp,_destPath,1,_totalBytes);
 }
+//
 int main(int argc, char** args){
+	if (argc==1 || argc>3){
+		fprintf(stderr,"%s <archive file> [out dir]\n",args[0]);
+		return 1;
+	}
+	char* _outRoot;
+	if (argc==3){
+		_outRoot=args[2];
+		// force it to end in a slash
+		if (_outRoot[strlen(_outRoot)-1]!='/'){
+			_outRoot=malloc(strlen(_outRoot)+2);
+			strcpy(_outRoot,args[2]);
+			_outRoot[strlen(_outRoot)]='/';
+			_outRoot[strlen(_outRoot)]='\0';
+		}
+	}else{
+		_outRoot="./";
+	}
 	FILE* fp = fopen(args[1],"rb");
+	if (!fp){
+		fprintf(stderr,"failed to open %s\n",args[1]);
+		exit(1);
+	}
 	// read top magic
 	readExpectedString(fp,TOPMAGIC);
 	// read version
@@ -158,15 +203,16 @@ int main(int argc, char** args){
 		char* _curComment=malloc(_commentLen+1);
 		freadSafe(_curComment,1,_commentLen,fp);
 		_curComment[_commentLen]='\0';
+		// add extract root dest
+		char* _fullPath = malloc(strlen(_curFilename)+strlen(_outRoot)+1);
+		strcpy(_fullPath,_outRoot);
+		strcat(_fullPath,_curFilename);
 		// read and then write file data
-		char* _bla = malloc(strlen(_curFilename)+3);
-		strcpy(_bla,"./");
-		strcat(_bla,_curFilename);
-		printf("To %s\n",_bla);
-		if (copyFile(fp, _bla,_fileLen)){
+		printf("To %s\n",_fullPath);
+		if (copyFile(fp,_fullPath,_fileLen)){
 			return 1;
 		}
-		free(_bla);
+		free(_fullPath);
 		// skip crc32
 		safeSkipBytes(fp,sizeof(uint32_t));
 	}
