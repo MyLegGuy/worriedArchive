@@ -1,0 +1,17 @@
+src = compress.c testcompress.c
+obj = $(src:.c=.o)
+
+LDFLAGS =
+CFLAGS = -g -Wall -Wno-switch -lz
+OUTNAME = compress.out
+
+$(OUTNAME): $(obj)
+	$(CC) -o $(OUTNAME) $^ $(CFLAGS) $(LDFLAGS)
+
+.PHONY: clean
+clean:
+	rm -f $(obj) $(OUTNAME)
+
+.PHONY: depend
+depend:
+	makedepend -Y $(src)

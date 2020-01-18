@@ -1,0 +1,17 @@
+src = testextract.c
+obj = $(src:.c=.o)
+
+LDFLAGS =
+CFLAGS = -g -Wall -lz
+OUTNAME = extract.out
+
+$(OUTNAME): $(obj)
+	$(CC) -o $(OUTNAME) $^ $(CFLAGS) $(LDFLAGS)
+
+.PHONY: clean
+clean:
+	rm -f $(obj) $(OUTNAME)
+
+.PHONY: depend
+depend:
+	makedepend -Y $(src)
