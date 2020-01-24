@@ -25,6 +25,7 @@ struct userCallbacks{
 	signed char(*getFilenameFunc)(size_t,char**,void*); // index, desd, userdata. you are in charge of the memory
 	signed char(*getCommentFunc)(size_t,char**,void*); // index, dest, userdata. you are in charge of the memory
 	getDataFunc getSourceData;
+	signed char(*getPropFunc)(size_t,uint8_t*,uint16_t*,void*); // index, property dest, propertyProperty dest, userdata.
 };
 struct compressState;
 struct compressState* newState(size_t _numSources);

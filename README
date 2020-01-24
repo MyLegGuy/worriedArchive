@@ -55,6 +55,8 @@ uint64_t fileDataLength
 uint16_t filenameLength
 uint16_t extraCommentLength
 uint64_t fileLastModifiedUnixTimestamp
+uint8_t fileProperty
+uint16_t filePropertyProperty
 
 section E:
 char[] filename (variable length. not null terminated.)
@@ -103,3 +105,10 @@ for(all files){
 --------
 a few extra bytes of magic is nothing. if you have a corrupted file, they'll be easier to search for.
 what purpose would there be to put the crc32 BEFORE the file data? you can't possibly verify it without reading all of the data anyway.
+fileProperty:
+	0 - regular file. filePropertyProperty can have any value because it should be ignored on read.
+	1 - symlink.
+	  if filePropertyProperty is 0 then the file content is a relative link. its link destination works like the filename for any other file in the archive.
+	  if 1 then file data is an absolute link. it'll probably be a broken link on most computers, but who knows.
+	2 - partial file. filePropertyProperty is the number of this part.
+	3 - partial file (last piece). filePropertyProperty is the number of this part.

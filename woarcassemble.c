@@ -150,6 +150,18 @@ top:
 			// write last modified time
 			memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].lastModified),sizeof(uint16_t));
 			state->usedBuff+=sizeof(uint64_t);
+			// write file property & propertyProperty
+			uint8_t _writeProperty;
+			uint16_t _writePropertyProperty;
+			if (state->user.getPropFunc(state->curSourceIndex,&_writeProperty,&_writePropertyProperty,state->user.userData)){
+				return -2;
+			}
+			_writePropertyProperty = htole16(_writePropertyProperty);
+			memcpy(state->putBuff+state->usedBuff,&_writeProperty,sizeof(uint8_t));
+			state->usedBuff+=sizeof(uint8_t);
+			memcpy(state->putBuff+state->usedBuff,&_writePropertyProperty,sizeof(uint16_t));
+			state->usedBuff+=sizeof(uint16_t);
+			//
 			if (state->isBottomTable){				
 				// also write crc32, which is already stored in little endian format
 				memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].crc32),sizeof(uint32_t));

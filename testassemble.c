@@ -56,6 +56,11 @@ signed char mygetDataFunc(void* src, char* dest, size_t requested, size_t* actua
 	}
 	return 0;
 }
+signed char myGetFileProp(size_t i, uint8_t* _dest, uint16_t* _dest2, void* _userData){
+	*_dest=0;
+	*_dest2=0;
+	return 0;
+}
 ///////////////////////
 // CLI
 ///////////////////////
@@ -118,6 +123,7 @@ int main(int argc, char** args){
 	c->getFilenameFunc=myGetFilename;
 	c->getCommentFunc=myGetComment;
 	c->getSourceData=mygetDataFunc;
+	c->getPropFunc=myGetFileProp;
 	// write archive to file
 	FILE* dest = fopen(args[2],"wb");
 	if (!dest){

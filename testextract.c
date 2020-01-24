@@ -196,6 +196,10 @@ int main(int argc, char** args){
 		read16(fp,&_commentLen);
 		// skip timestamp
 		safeSkipBytes(fp,sizeof(uint64_t));
+		// skip property
+		safeSkipBytes(fp,sizeof(uint8_t));
+		// skip propertyProperty
+		safeSkipBytes(fp,sizeof(uint16_t));
 		// read variable sized name and comment
 		char* _curFilename=malloc(_nameLen+1);
 		freadSafe(_curFilename,1,_nameLen,fp);
