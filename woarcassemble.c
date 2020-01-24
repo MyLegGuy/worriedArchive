@@ -5,7 +5,7 @@
 #include <endian.h>
 #include <zlib.h>
 #include <time.h>
-#include "warccompress.h"
+#include "woarcassemble.h"
 
 enum writeState{
 	WRITESTATE_UNKNOWN=0,

@@ -1,9 +1,9 @@
-src = warccompress.c
+src = woarcassemble.c
 obj = $(src:.c=.o)
 
 LDFLAGS = 
 CFLAGS = -g -I.
-OUTNAME = libwarc.a
+OUTNAME = libwoarc.a
 
 $(OUTNAME): $(obj)
 	ar rcs $(OUTNAME) $(obj)
@@ -13,6 +13,6 @@ clean:
 	rm -f $(obj) $(OUTNAME)
 
 install: $(OUTNAME)
-	cp warccompress.h /usr/local/include/
+	cp woarccompress.h /usr/local/include/
 	cp $(OUTNAME) /usr/local/lib/
 	@echo installed

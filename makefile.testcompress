@@ -1,7 +1,7 @@
-src = testcompress.c
+src = testassemble.c
 obj = $(src:.c=.o)
 
-LDFLAGS = -L. -lwarc
+LDFLAGS = -L. -lwoarc
 CFLAGS = -I. -g -Wall -Wno-switch -lz
 OUTNAME = compress.out
 
