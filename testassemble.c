@@ -5,7 +5,7 @@
 #include <ftw.h>
 #include <time.h>
 #include <sys/stat.h>
-#include "compress.h"
+#include <warccompress.h>
 //////////////////////
 // file callbacks
 //////////////////////

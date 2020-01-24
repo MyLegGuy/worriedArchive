@@ -33,7 +33,7 @@ signed char safeSkipBytes(FILE* fp, size_t _numForward){
 	}
 	return 0;
 }
-// read a string and if it's not what was expected then return -2
+// read a string and if it's not what was expected then exit
 signed char readExpectedString(FILE* fp, const char* _expected){
 	int _len = strlen(_expected);
 	char _readBytes[_len];

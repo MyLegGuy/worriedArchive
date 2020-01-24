@@ -1,0 +1,18 @@
+src = warccompress.c
+obj = $(src:.c=.o)
+
+LDFLAGS = 
+CFLAGS = -g -I.
+OUTNAME = libwarc.a
+
+$(OUTNAME): $(obj)
+	ar rcs $(OUTNAME) $(obj)
+
+.PHONY: clean
+clean:
+	rm -f $(obj) $(OUTNAME)
+
+install: $(OUTNAME)
+	cp warccompress.h /usr/local/include/
+	cp $(OUTNAME) /usr/local/lib/
+	@echo installed

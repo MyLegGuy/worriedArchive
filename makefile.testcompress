@@ -1,8 +1,8 @@
-src = compress.c testcompress.c
+src = testcompress.c
 obj = $(src:.c=.o)
 
-LDFLAGS =
-CFLAGS = -g -Wall -Wno-switch -lz
+LDFLAGS = -L. -lwarc
+CFLAGS = -I. -g -Wall -Wno-switch -lz
 OUTNAME = compress.out
 
 $(OUTNAME): $(obj)
