@@ -3,7 +3,7 @@ obj = $(src:.c=.o)
 
 LDFLAGS = -L. -lwoarc
 CFLAGS = -I. -g -Wall -Wno-switch -lz
-OUTNAME = compress.out
+OUTNAME = assemble.out
 
 $(OUTNAME): $(obj)
 	$(CC) -o $(OUTNAME) $^ $(CFLAGS) $(LDFLAGS)

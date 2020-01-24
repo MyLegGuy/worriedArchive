@@ -1,4 +1,4 @@
-WARC - Worried Archive
+WOARC - Worried Archive
 simple archive format
 
 features:
@@ -36,9 +36,9 @@ features:
 
 #define TOPMAGIC "WORRIEDARCHIVEMAGIC"
 #define WRITEVERSION 1
-#define MFHMAGIC "WARCFILE"
+#define MFHMAGIC "WOARCFILE"
 #define TABLEMAGIC "WORRIEDTABLESTART"
-#define BGFMAGIC "WARCENTRY"
+#define BGFMAGIC "WOARCENTRY"
 
 section A:
 <TOPMAGIC>
