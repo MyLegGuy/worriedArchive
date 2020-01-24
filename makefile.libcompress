@@ -13,6 +13,6 @@ clean:
 	rm -f $(obj) $(OUTNAME)
 
 install: $(OUTNAME)
-	cp woarccompress.h /usr/local/include/
+	cp woarcassemble.h /usr/local/include/
 	cp $(OUTNAME) /usr/local/lib/
 	@echo installed
