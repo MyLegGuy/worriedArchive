@@ -1,3 +1,4 @@
+// See LICENSE.woarc file for license information
 #include <stdint.h>
 /*
 -2: error.

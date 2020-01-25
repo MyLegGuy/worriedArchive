@@ -1,3 +1,4 @@
+// See LICENSE.woarc file for license information
 #define TOPMAGIC "WORRIEDARCHIVEMAGIC"
 #define WRITEVERSION 1
 #define MFHMAGIC "WOARCFILE" // middle file header

@@ -1,3 +1,4 @@
+// See LICENSE.woarc file for license information
 #include <stdio.h>
 #include <string.h>
 #include <fcntl.h>

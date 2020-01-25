@@ -1,3 +1,4 @@
+// See LICENSE.woarc file for license information
 #define _XOPEN_SOURCE 500 // enable nftw
 #include <stdio.h>
 #include <stdlib.h>
