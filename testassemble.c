@@ -116,7 +116,8 @@ int main(int argc, char** args){
 	struct fileCallInfo* i = malloc(sizeof(struct fileCallInfo));
 	i->filenames=globalFiles;
 	i->rootDir=rootDirAdd;
-	struct compressState* s = newState(curUsedFiles);
+	struct compressState* s = allocCompressState();
+	initCompressState(s,curUsedFiles);
 	struct userCallbacks* c = getCallbacks(s);
 	c->userData=i; // see the usage of the passed userdata in the source open functions
 	c->initSourceFunc=myInitSource;

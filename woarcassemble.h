@@ -29,8 +29,9 @@ struct userCallbacks{
 	signed char(*getPropFunc)(size_t,uint8_t*,uint16_t*,void*); // index, property dest, propertyProperty dest, userdata.
 };
 struct compressState;
-struct compressState* newState(size_t _numSources);
-struct userCallbacks* getCallbacks(struct compressState* s);
+struct compressState* allocCompressState(); // just uses malloc to make the state
+signed char initCompressState(struct compressState* state, size_t _numSources); // use after allocState. can be used again to delete old state and make a new one with a different size but with same callbacks.
+struct userCallbacks* getCallbacks(struct compressState* s); // use after initState. set your things.
 signed char makeMoreArchive(struct compressState* state, char* dest, size_t bytesRequested, size_t* numBytesWritten);
 //
 void setTime(struct compressState* s, time_t _newTime);

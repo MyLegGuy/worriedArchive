@@ -320,10 +320,12 @@ struct userCallbacks* getCallbacks(struct compressState* s){
 void setTime(struct compressState* s, time_t _newTime){
 	s->cachedTime=_newTime;
 }
-struct compressState* newState(size_t _numSources){
-	struct compressState* state = malloc(sizeof(struct compressState));
+signed char initCompressState(struct compressState* state, size_t _numSources){
+	free(state->cachedMeta);
+	if (!(state->cachedMeta=malloc(sizeof(struct fileMeta)*_numSources))){
+		return -2;
+	}
 	state->numSources=_numSources;
-	state->cachedMeta=malloc(sizeof(struct fileMeta)*_numSources);
 	// queue magic as first thing to do by using buffer write state that instantly ends
 	resetBuffState(state,WRITESTATE_TOPMAGIC);
 	state->usedBuff=0; // will cause to go to WRITESTATE_TOPMAGIC instantly
@@ -331,5 +333,13 @@ struct compressState* newState(size_t _numSources){
 	state->isBottomTable=0;
 	state->filePos=0;
 	state->cachedTime=time(NULL); // programmer can change this variable right after this function call if he wishes
+	return 0;
+}
+struct compressState* allocCompressState(){
+	struct compressState* state=NULL;
+	if (!(state=malloc(sizeof(struct compressState)))){
+		return NULL;
+	}
+	state->cachedMeta=NULL;
 	return state;
 }
