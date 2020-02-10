@@ -22,7 +22,7 @@ signed char getFileSize(FILE* fp, size_t* ret){
 	*ret=st.st_size;
 	return 0;
 }
-signed char myInitSource(size_t i, struct fileMeta* infoDest, void** srcDest, void* _userData){
+signed char myInitSource(size_t i, struct fileMeta* infoDest, void** srcDest, struct userCallbacks* c, void* _userData){
 	if (!(*srcDest=fopen(((struct fileCallInfo*)_userData)->filenames[i],"rb"))){
 		return -2;
 	}

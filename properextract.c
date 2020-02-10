@@ -9,9 +9,7 @@
 #include <dirent.h>
 #include <stdlib.h>
 #include <zlib.h>
-#include "formatInfo.h"
-//
-char isstdin=0;
+#include "woarcFormatInfo.h"
 //
 const char* findCharBackwards(const char* _startHere, const char* _endHere, int _target){
 	do{
@@ -31,22 +29,11 @@ signed char freadSafe(void *ptr, size_t size, size_t nmemb, FILE *stream){
 	return 0;
 }
 signed char safeSkipBytes(FILE* fp, size_t _numForward){
-	if (!isstdin){
-		if (fseek(fp,_numForward,SEEK_CUR)){
-			fprintf(stderr,"seek error\n");
-			exit(1);
-		}
-		return 0;
-	}else{
-		while(_numForward!=0){
-			if (fgetc(fp)==EOF){
-				fprintf(stderr,"fgetc in safeSkipBytes fail\n");
-				exit(1);
-			}
-			_numForward--;
-		}
-		return 0;
+	if (fseek(fp,_numForward,SEEK_CUR)){
+		fprintf(stderr,"seek error\n");
+		exit(1);
 	}
+	return 0;
 }
 // read a string and if it's not what was expected then exit
 signed char readExpectedString(FILE* fp, const char* _expected){
@@ -80,6 +67,40 @@ char dirExists(const char* _passedPath){
 	return 0;
 }
 //
+// Make all directories that need to be made for the destination to work
+// returns 1 if actually made any folders
+char makeRequiredDirs(const char* _destPath){
+	char _ret=0;
+	char* _tempPath = strdup(_destPath);
+	int _numMakeDirs=0;
+	while(1){
+		char* _possibleSeparator=(char*)findCharBackwards(&(_tempPath[strlen(_tempPath)-1]),_tempPath,'/');
+		if (_possibleSeparator!=NULL && _possibleSeparator!=_tempPath){
+			_possibleSeparator[0]='\0';
+			if (dirExists(_tempPath)){ // When the directory that does exist is found break to create the missing ones in order.
+				break;
+			}else{
+				++_numMakeDirs;
+			}
+		}else{
+			break;
+		}
+	}
+	if (_numMakeDirs>0){
+		_ret=1;
+		int i;
+		for (i=0;i<_numMakeDirs;++i){
+			_tempPath[strlen(_tempPath)]='/';
+			if (mkdir(_tempPath,0777)){
+				fprintf(stderr,"Failed to make directory %s\n",_tempPath);
+				perror(NULL);
+				exit(1);
+			}
+		}
+	}
+	free(_tempPath);
+	return _ret;
+}
 #define COPYBUFF 16000
 // returns the hash
 uLong copyFile(FILE* _sourceFp, const char* _destPath, size_t _totalBytes){
@@ -110,37 +131,7 @@ top:
 		return _retHash;
 	}else{
 		// Make all directories that need to be made for the destination to work
-		char _shouldRetry=0;
-		if (_canMakeDirs){
-			char* _tempPath = strdup(_destPath);
-			int _numMakeDirs=0;
-			while(1){
-				char* _possibleSeparator=(char*)findCharBackwards(&(_tempPath[strlen(_tempPath)-1]),_tempPath,'/');
-				if (_possibleSeparator!=NULL && _possibleSeparator!=_tempPath){
-					_possibleSeparator[0]='\0';
-					if (dirExists(_tempPath)){ // When the directory that does exist is found break to create the missing ones in order.
-						break;
-					}else{
-						++_numMakeDirs;
-					}
-				}else{
-					break;
-				}
-			}
-			if (_numMakeDirs>0){
-				_shouldRetry=1;
-				int i;
-				for (i=0;i<_numMakeDirs;++i){
-					_tempPath[strlen(_tempPath)]='/';
-					if (mkdir(_tempPath,0777)){
-						fprintf(stderr,"Failed to make directory %s\n",_tempPath);
-						perror(NULL);
-						exit(1);
-					}
-				}
-			}
-			free(_tempPath);
-		}
+		char _shouldRetry=(_canMakeDirs && makeRequiredDirs(_destPath));
 		if (_shouldRetry){
 			_canMakeDirs=0;
 			goto top;
@@ -169,13 +160,7 @@ int main(int argc, char** args){
 	}else{
 		_outRoot="./";
 	}
-	FILE* fp;
-	if (strcmp(args[1],"-")==0){
-		isstdin=1;
-		fp=stdin;
-	}else{
-		fp=fopen(args[1],"rb");
-	}
+	FILE* fp = fopen(args[1],"rb");
 	if (!fp){
 		fprintf(stderr,"failed to open %s\n",args[1]);
 		exit(1);
@@ -208,10 +193,12 @@ int main(int argc, char** args){
 		read16(fp,&_commentLen);
 		// skip timestamp
 		safeSkipBytes(fp,sizeof(uint64_t));
-		// skip property
-		safeSkipBytes(fp,sizeof(uint8_t));
-		// skip propertyProperty
-		safeSkipBytes(fp,sizeof(uint16_t));
+		// property
+		unsigned char prop;
+		freadSafe(&prop,1,1,fp);
+		// propertyProperty
+		uint16_t propProp;
+		read16(fp,&propProp);
 		// read variable sized name and comment
 		char* _curFilename=malloc(_nameLen+1);
 		freadSafe(_curFilename,1,_nameLen,fp);
@@ -223,10 +210,39 @@ int main(int argc, char** args){
 		char* _fullPath = malloc(strlen(_curFilename)+strlen(_outRoot)+1);
 		strcpy(_fullPath,_outRoot);
 		strcat(_fullPath,_curFilename);
-		// read and then write file data
+		uint32_t _gotHash;
+		// ready and pointing to the start of the file data
 		printf("To %s\n",_fullPath);
-		uint32_t _gotHash = copyFile(fp,_fullPath,_fileLen);
-		free(_fullPath);
+		if (prop==FILEPROP_NORMAL){
+			// read and then write file data
+			_gotHash = copyFile(fp,_fullPath,_fileLen);
+			free(_fullPath);
+		}else if (prop==FILEPROP_LINK){
+			// read and hash the link destination
+			char* _linkDest;
+			if (propProp==0){ // is a relative link, prepend the thing
+				_linkDest=malloc(strlen(_outRoot)+_fileLen+1);
+				strcpy(_linkDest,_outRoot);
+			}else{ // it's an absolute link
+				_linkDest = malloc(_fileLen+1);
+				_linkDest[0]='\0';
+			}
+			char* _readPos=&_linkDest[strlen(_linkDest)];
+			freadSafe(_readPos,1,_fileLen,fp);
+			_gotHash = crc32_z(crc32_z(0L,Z_NULL,0),(const Bytef*)_readPos,_fileLen);
+			// make link
+			if (symlink(_linkDest,_fullPath)){
+				// if it fails, perhaps we need to make folders first
+				if (!makeRequiredDirs(_fullPath) || symlink(_linkDest,_fullPath)){
+					perror("symlink creation");					
+				}
+			}
+			free(_linkDest);
+			// hash link
+		}else{
+			fprintf(stderr,"bad file property %d\n",prop);
+			exit(1);
+		}
 		// check crc32
 		uint32_t _expected;
 		read32(fp,&_expected);

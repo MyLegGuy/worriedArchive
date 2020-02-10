@@ -8,7 +8,7 @@
 #include <stdint.h>
 #include <dirent.h>
 #include <stdlib.h>
-#include "formatInfo.h"
+#include "woarcFormatInfo.h"
 //
 const char* findCharBackwards(const char* _startHere, const char* _endHere, int _target){
 	do{

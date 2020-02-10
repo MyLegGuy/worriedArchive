@@ -14,5 +14,6 @@ clean:
 
 install: $(OUTNAME)
 	cp woarcassemble.h /usr/local/include/
+	cp woarcFormatInfo.h /usr/local/include/
 	cp $(OUTNAME) /usr/local/lib/
 	@echo installed

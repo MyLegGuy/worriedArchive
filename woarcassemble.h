@@ -19,7 +19,8 @@ struct userCallbacks{
 	// for the file at the supplied index:
 	// fill the len and lastModified fields of the fileMeta struct
 	// put the source  custom pointer into the void**
-	signed char(*initSourceFunc)(size_t,struct fileMeta*,void**,void*);
+	// you may modify the callbacks if you wish
+	signed char(*initSourceFunc)(size_t,struct fileMeta*,void**,struct userCallbacks*,void*);
 	// close the supplied source. index is only there if you need it.
 	// this source will never be opened again
 	signed char(*closeSourceFunc)(size_t,void*,void*); // index, sourceData, userdata

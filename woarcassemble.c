@@ -47,7 +47,7 @@ struct compressState{
 	struct userCallbacks user;
 };
 
-#include "formatInfo.h"
+#include "woarcFormatInfo.h"
 
 signed char getFileBitAndHash(void* _uncastState, char* dest, size_t bytesRequested, size_t* numBytesWritten){
 	struct compressState* state = _uncastState;
@@ -118,7 +118,7 @@ top:
 		case WRITESTATE_FILEHEADER:
 			// prepare file buffer here
 			if (!state->isBottomTable){
-				if (state->user.initSourceFunc(state->curSourceIndex,state->cachedMeta+state->curSourceIndex,&state->curSourceData,state->user.userData)){
+				if (state->user.initSourceFunc(state->curSourceIndex,state->cachedMeta+state->curSourceIndex,&state->curSourceData,&state->user,state->user.userData)){
 					return -2;
 				}
 				state->cachedMeta[state->curSourceIndex].len = htole64(state->cachedMeta[state->curSourceIndex].len);
