@@ -149,7 +149,7 @@ top:
 			memcpy(state->putBuff+state->usedBuff,&_tempLen,sizeof(uint16_t));
 			state->usedBuff+=sizeof(uint16_t);
 			// write last modified time
-			memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].lastModified),sizeof(uint16_t));
+			memcpy(state->putBuff+state->usedBuff,&(state->cachedMeta[state->curSourceIndex].lastModified),sizeof(uint64_t));
 			state->usedBuff+=sizeof(uint64_t);
 			// write file property & propertyProperty
 			uint8_t _writeProperty;

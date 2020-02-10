@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <stdlib.h>
 #include <zlib.h>
+#include <sys/time.h>
 #include "woarcFormatInfo.h"
 //
 const char* findCharBackwards(const char* _startHere, const char* _endHere, int _target){
@@ -191,8 +192,10 @@ int main(int argc, char** args){
 		read64(fp,&_fileLen);
 		read16(fp,&_nameLen);
 		read16(fp,&_commentLen);
-		// skip timestamp
-		safeSkipBytes(fp,sizeof(uint64_t));
+		// timestamp
+		uint64_t _modifiedTime;
+		read64(fp,&_modifiedTime);
+		printf("modified at %ld\n",_modifiedTime);
 		// property
 		unsigned char prop;
 		freadSafe(&prop,1,1,fp);
@@ -216,7 +219,6 @@ int main(int argc, char** args){
 		if (prop==FILEPROP_NORMAL){
 			// read and then write file data
 			_gotHash = copyFile(fp,_fullPath,_fileLen);
-			free(_fullPath);
 		}else if (prop==FILEPROP_LINK){
 			// read and hash the link destination
 			char* _linkDest;
@@ -238,11 +240,19 @@ int main(int argc, char** args){
 				}
 			}
 			free(_linkDest);
-			// hash link
 		}else{
 			fprintf(stderr,"bad file property %d\n",prop);
 			exit(1);
 		}
+		// set timestamp
+		struct timeval _stamps[2];
+		_stamps[0].tv_sec=_modifiedTime;
+		_stamps[0].tv_usec=0;
+		_stamps[1]=_stamps[0];
+		if (lutimes(_fullPath,_stamps)){
+			perror("failed to set file modified time");
+		}
+		free(_fullPath);
 		// check crc32
 		uint32_t _expected;
 		read32(fp,&_expected);
