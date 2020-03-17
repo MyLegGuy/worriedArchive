@@ -14,24 +14,18 @@ struct fileCallInfo{
 	char** filenames; // absolute filenames
 	char* rootDir; // ends in a slash. chop everything off the filename past this. 
 };
-signed char getFileSize(FILE* fp, size_t* ret){
-	struct stat st;
-	if (fstat(fileno(fp),&st)){
-		return -2;
-	}
-	*ret=st.st_size;
-	return 0;
-}
 signed char myInitSource(size_t i, struct fileMeta* infoDest, void** srcDest, struct userCallbacks* c, void* _userData){
 	if (!(*srcDest=fopen(((struct fileCallInfo*)_userData)->filenames[i],"rb"))){
 		return -2;
 	}
-	size_t _gotLen;
-	if (getFileSize(*srcDest,&_gotLen)){
+	// get size
+	struct stat st;
+	if (fstat(fileno(*srcDest),&st)){
 		return -2;
 	}
-	infoDest->len=_gotLen;
-	infoDest->lastModified=0;
+	infoDest->len=st.st_size;
+	// get last modified time
+	infoDest->lastModified=st.st_mtime;
 	return 0;
 }
 signed char myCloseSource(size_t i, void* _closeThis, void* _userData){
